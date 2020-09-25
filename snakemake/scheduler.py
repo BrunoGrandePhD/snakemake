@@ -73,6 +73,8 @@ class JobScheduler:
         google_lifesciences_location=None,
         google_lifesciences_cache=False,
         precommand="",
+        preemption_default=None,
+        preemptible_rules=None,
         tibanna_config=False,
         jobname=None,
         quiet=False,
@@ -294,6 +296,8 @@ class JobScheduler:
                 quiet=quiet,
                 printshellcmds=printshellcmds,
                 latency_wait=latency_wait,
+                preemption_default=preemption_default,
+                preemptible_rules=preemptible_rules,
             )
 
         else:
@@ -533,7 +537,7 @@ class JobScheduler:
 
     def job_selector_ilp(self, jobs):
         """
-        Job scheduling by optimization of resource usage by solving ILP using pulp 
+        Job scheduling by optimization of resource usage by solving ILP using pulp
         """
         import pulp
         from pulp import lpSum
@@ -541,7 +545,10 @@ class JobScheduler:
         # assert self.resources["_cores"] > 0
         scheduled_jobs = {
             job: pulp.LpVariable(
-                f"job_{job}_{idx}", lowBound=0, upBound=1, cat=pulp.LpInteger
+                "job_{job}_{idx}".format(job=job, idx=idx),
+                lowBound=0,
+                upBound=1,
+                cat=pulp.LpInteger,
             )
             for idx, job in enumerate(jobs)
         }
@@ -556,7 +563,7 @@ class JobScheduler:
             )
             for temp_file in temp_files
         }
-        prob = pulp.LpProblem("Job scheduler", pulp.LpMaximize)
+        prob = pulp.LpProblem("JobScheduler", pulp.LpMaximize)
 
         total_temp_size = max(sum([temp_file.size for temp_file in temp_files]), 1)
         total_core_requirement = sum(
@@ -593,7 +600,7 @@ class JobScheduler:
                     [scheduled_jobs[job] * job.resources.get(name, 0) for job in jobs]
                 )
                 <= self.resources[name],
-                f"Limitation of resource: {name}",
+                "limitation_of_resource_{name}".format(name=name),
             )
 
         # Choose jobs that lead to "fastest" (minimum steps) removal of existing temp file
@@ -604,6 +611,16 @@ class JobScheduler:
                     for job in jobs
                 ]
             ) / lpSum([self.required_by_job(temp_file, job) for job in jobs])
+
+        # TODO enable this code once we have switched to pulp >=2.0
+        if pulp.apis.LpSolverDefault is None:
+            raise WorkflowError(
+                "You need to install at least one LP solver compatible with PuLP (e.g. coincbc). "
+                "See https://coin-or.github.io/pulp for details. Alternatively, run Snakemake with "
+                "--scheduler greedy."
+            )
+        # disable extensive logging
+        pulp.apis.LpSolverDefault.msg = False
 
         prob.solve()
         selected_jobs = [
