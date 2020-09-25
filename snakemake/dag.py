@@ -784,7 +784,7 @@ class DAG:
             # This should provide faster access to existence and mtime information
             # than querying file by file. If the file type does not support inventory
             # information, this call is a no-op.
-            file.inventory()
+            # file.inventory()``
 
             if not jobs:
                 # no producing job found
